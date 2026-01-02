@@ -10,6 +10,10 @@ export function CreateConnection(arg1, arg2, arg3) {
   return window['go']['main']['App']['CreateConnection'](arg1, arg2, arg3);
 }
 
+export function DeleteConnection(arg1) {
+  return window['go']['main']['App']['DeleteConnection'](arg1);
+}
+
 export function ExecuteQuery(arg1, arg2) {
   return window['go']['main']['App']['ExecuteQuery'](arg1, arg2);
 }

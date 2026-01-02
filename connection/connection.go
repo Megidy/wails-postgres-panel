@@ -3,12 +3,12 @@ package connection
 import (
 	"context"
 	"fmt"
+	"log"
 	"sync/atomic"
 	"time"
 	"wails-postgres-panel/entity"
 
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
 const ctxTimeout = time.Second * 10
@@ -16,17 +16,22 @@ const ctxTimeout = time.Second * 10
 var idCounter atomic.Int64
 
 type Connection struct {
-	ConnectionId int64         `json:"connection_id"`
-	Name         string        `json:"name"`
-	URI          string        `json:"uri"`
-	Description  string        `json:"description"`
-	Pool         *pgxpool.Pool `json:"-"`
+	ConnectionId       int64         `json:"connection_id"`
+	Name               string        `json:"name"`
+	URI                string        `json:"uri"`
+	ConnectionDuration time.Duration `json:"connection_duration"`
+	Description        string        `json:"description"`
+	Pool               *pgxpool.Pool `json:"-"`
 }
 
 type ExecutionResult struct {
 	Data         [][]string `json:"data"`
 	IsExecutable bool       `json:"is_executable"`
 	AffectedRows int        `json:"affected_rows"`
+}
+
+func SetIdCounter(id int64) {
+	idCounter.Store(id)
 }
 
 func (c *Connection) ExecuteQuery(ctx context.Context, query string) (*ExecutionResult, error) {
@@ -71,16 +76,14 @@ func (c *Connection) ExecuteQuery(ctx context.Context, query string) (*Execution
 }
 
 func (c *Connection) Connect(ctx context.Context) error {
-	ctx, cancel := context.WithTimeout(context.Background(), ctxTimeout)
+	internalCtx, cancel := context.WithTimeout(ctx, ctxTimeout)
 	defer cancel()
-	pool, err := pgxpool.New(ctx, c.URI)
+	pool, err := pgxpool.New(internalCtx, c.URI)
 	if err != nil {
 		return fmt.Errorf("failed to create connection: %w", err)
 	}
 
-	ctx, cancel = context.WithTimeout(context.Background(), ctxTimeout)
-	defer cancel()
-	err = pool.Ping(ctx)
+	err = pool.Ping(internalCtx)
 
 	if err != nil {
 		return fmt.Errorf("failed to ping connection: %w", err)
@@ -96,18 +99,19 @@ func (c *Connection) Connect(ctx context.Context) error {
 
 				err := c.CloseConnection(ctx)
 				if err != nil {
-					runtime.LogErrorf(ctx, "failed to close connection: %s", err.Error())
+					log.Printf("failed to close connection: %s", err.Error())
 				}
 			case <-time.After(time.Second * 60):
 				err := c.CloseConnection(ctx)
 				if err != nil {
-					runtime.LogErrorf(ctx, "failed to close connection: %s", err.Error())
+					log.Printf("failed to close connection: %s", err.Error())
 				}
 
 			}
 
 		}()
 	}()
+	c.Pool = pool
 
 	return nil
 }

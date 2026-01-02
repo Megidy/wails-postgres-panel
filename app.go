@@ -45,7 +45,119 @@ func (a *App) startup(ctx context.Context) {
 		connections = make(map[int64]*connection.Connection)
 	}
 
+	var maxId int64
+
+	for id, _ := range connections {
+		if id > maxId {
+			maxId = id
+		}
+	}
+
+	connection.SetIdCounter(maxId)
+
 	a.connections = connections
+
+	log.Printf("successfully started")
+}
+
+func (a *App) onShutdown(ctx context.Context) {
+	a.stateLock.Lock()
+	defer a.stateLock.Unlock()
+	for _, conn := range a.connections {
+		conn.CloseConnection(ctx)
+	}
+	log.Printf("successfully shut down app")
+}
+
+func (a *App) Connect(connectionId int64) *entity.Response[struct{}] {
+	a.stateLock.RLock()
+	conn, exists := a.connections[connectionId]
+	if !exists {
+		a.stateLock.RUnlock()
+		return entity.NewResponse(struct{}{}, entity.ErrNoConnectionFound)
+	}
+	a.stateLock.RUnlock()
+
+	err := conn.Connect(a.ctx)
+	if err != nil {
+		log.Printf("failed to connect: %v", err)
+		return entity.NewResponse(struct{}{}, err)
+	}
+	log.Printf("successfully connected")
+	return entity.NewResponse(struct{}{}, nil)
+}
+
+func (a *App) CreateConnection(uri, name, description string) *entity.Response[*connection.Connection] {
+	conn, err := connection.NewConnection(uri, name, description)
+	if err != nil {
+		entity.NewResponse(&connection.Connection{}, err)
+	}
+	a.stateLock.Lock()
+	defer a.stateLock.Unlock()
+	a.connections[conn.ConnectionId] = conn
+
+	a.saveConnection(a.connections)
+	return entity.NewResponse(conn, nil)
+}
+
+func (a *App) GetAllConnections() *entity.Response[[]*connection.Connection] {
+	a.stateLock.RLock()
+	defer a.stateLock.RUnlock()
+
+	return entity.NewResponse(MapToArray(a.connections), nil)
+}
+
+func (a *App) DeleteConnection(connectionId int64) *entity.Response[struct{}] {
+	a.stateLock.Lock()
+	defer a.stateLock.Unlock()
+	conn, exists := a.connections[connectionId]
+	if !exists {
+		return entity.NewResponse(struct{}{}, entity.ErrNoConnectionFound)
+	}
+
+	conn.CloseConnection(a.ctx)
+
+	delete(a.connections, connectionId)
+
+	a.saveConnection(a.connections)
+	return entity.NewResponse(struct{}{}, nil)
+}
+
+func (a *App) ExecuteQuery(connectionId int64, query string) *entity.Response[*connection.ExecutionResult] {
+	a.stateLock.RLock()
+	conn, exists := a.connections[connectionId]
+	if !exists {
+		a.stateLock.RUnlock()
+		return entity.NewResponse(&connection.ExecutionResult{}, entity.ErrNoConnectionFound)
+	}
+	a.stateLock.RUnlock()
+
+	ctx, cancel := context.WithTimeout(a.ctx, ctxTimeout)
+	defer cancel()
+
+	res, err := conn.ExecuteQuery(ctx, query)
+	if err != nil {
+		return entity.NewResponse(&connection.ExecutionResult{}, err)
+	}
+	return entity.NewResponse(res, nil)
+}
+
+func getOrCreateConfigFilePath() (string, error) {
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("failed to get user home dir: %w", err)
+	}
+
+	configDir := filepath.Join(homeDir, ".config", "wails-postgres-panel")
+
+	err = os.MkdirAll(configDir, 0o755)
+	if err != nil {
+		return "", fmt.Errorf("failed to make all dirs: %w", err)
+	}
+
+	fp := filepath.Join(configDir, "config.json")
+
+	return fp, nil
 }
 
 func (a *App) loadConnections() (map[int64]*connection.Connection, error) {
@@ -99,79 +211,4 @@ func (a *App) saveConnection(conns map[int64]*connection.Connection) error {
 	enc := json.NewEncoder(f)
 	enc.SetIndent("", "  ")
 	return enc.Encode(data)
-}
-
-func (a *App) Connect(connectionId int64) *entity.Response[struct{}] {
-	a.stateLock.RLock()
-	conn, exists := a.connections[connectionId]
-	if !exists {
-		a.stateLock.RUnlock()
-		return entity.NewResponse(struct{}{}, entity.ErrNoConnectionFound)
-	}
-	a.stateLock.RUnlock()
-
-	err := conn.Connect(a.ctx)
-	if err != nil {
-		return entity.NewResponse(struct{}{}, err)
-	}
-
-	return entity.NewResponse(struct{}{}, nil)
-}
-
-func (a *App) CreateConnection(uri, name, description string) *entity.Response[*connection.Connection] {
-	conn, err := connection.NewConnection(uri, name, description)
-	if err != nil {
-		entity.NewResponse(&connection.Connection{}, err)
-	}
-	a.stateLock.Lock()
-	defer a.stateLock.Unlock()
-	a.connections[conn.ConnectionId] = conn
-
-	a.saveConnection(a.connections)
-	return entity.NewResponse(conn, nil)
-}
-
-func (a *App) GetAllConnections() *entity.Response[[]*connection.Connection] {
-	a.stateLock.RLock()
-	defer a.stateLock.RUnlock()
-
-	return entity.NewResponse(MapToArray(a.connections), nil)
-}
-
-func (a *App) ExecuteQuery(connectionId int64, query string) *entity.Response[*connection.ExecutionResult] {
-	a.stateLock.RLock()
-	conn, exists := a.connections[connectionId]
-	if !exists {
-		a.stateLock.RUnlock()
-		return entity.NewResponse(&connection.ExecutionResult{}, entity.ErrNoConnectionFound)
-	}
-	a.stateLock.RUnlock()
-
-	ctx, cancel := context.WithTimeout(a.ctx, ctxTimeout)
-	defer cancel()
-
-	res, err := conn.ExecuteQuery(ctx, query)
-	if err != nil {
-		return entity.NewResponse(&connection.ExecutionResult{}, err)
-	}
-	return entity.NewResponse(res, nil)
-
-}
-
-func getOrCreateConfigFilePath() (string, error) {
-	homeDir, err := os.UserHomeDir()
-	if err != nil {
-		return "", fmt.Errorf("failed to get user home dir: %w", err)
-	}
-
-	configDir := filepath.Join(homeDir, ".config", "wails-postgres-panel")
-
-	err = os.MkdirAll(configDir, 0o755)
-	if err != nil {
-		return "", fmt.Errorf("failed to make all dirs: %w", err)
-	}
-
-	fp := filepath.Join(configDir, "config.json")
-
-	return fp, nil
 }

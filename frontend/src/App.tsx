@@ -11,7 +11,7 @@ function App() {
 
       <Routes>
         <Route path="/" element={<Home />} />
-        <Route path="/query" element={<Query />} />
+        <Route path="/connection/:id/query" element={<Query />} />
         <Route path="/connections" element={<Connections />} />
       </Routes>
     </Router>

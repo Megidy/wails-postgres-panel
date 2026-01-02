@@ -4,6 +4,7 @@ export namespace connection {
 	    connection_id: number;
 	    name: string;
 	    uri: string;
+	    connection_duration: number;
 	    description: string;
 	
 	    static createFrom(source: any = {}) {
@@ -15,6 +16,7 @@ export namespace connection {
 	        this.connection_id = source["connection_id"];
 	        this.name = source["name"];
 	        this.uri = source["uri"];
+	        this.connection_duration = source["connection_duration"];
 	        this.description = source["description"];
 	    }
 	}

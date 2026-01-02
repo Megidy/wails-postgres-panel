@@ -6,6 +6,8 @@ export function Connect(arg1:number):Promise<entity.Response_struct____>;
 
 export function CreateConnection(arg1:string,arg2:string,arg3:string):Promise<entity.Response_wails_postgres_panel_connection_Connection_>;
 
+export function DeleteConnection(arg1:number):Promise<entity.Response_struct____>;
+
 export function ExecuteQuery(arg1:number,arg2:string):Promise<entity.Response_wails_postgres_panel_connection_ExecutionResult_>;
 
 export function GetAllConnections():Promise<entity.Response___wails_postgres_panel_connection_Connection_>;
